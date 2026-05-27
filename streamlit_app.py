@@ -1,6 +1,4 @@
 import json
-import os
-import re
 from pathlib import Path
 
 import streamlit as st
@@ -9,7 +7,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -24,24 +23,44 @@ st.set_page_config(
 )
 
 # =========================================================
-# FILE PATHS
+# API KEY
+# =========================================================
+
+try:
+
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+
+except Exception:
+
+    st.error(
+        """
+        GOOGLE_API_KEY not found.
+
+        Go to:
+
+        App Settings → Secrets
+
+        Then add:
+
+        GOOGLE_API_KEY="your_api_key"
+        """
+    )
+
+    st.stop()
+
+# =========================================================
+# FILE PATH
 # =========================================================
 
 BASE_DIR = Path(__file__).parent
 
-PROMPTS_DIR = BASE_DIR / "prompts"
-
-COURSE_BROCHURE = PROMPTS_DIR / "coursebrochure.pdf"
+COURSE_BROCHURE = (
+    BASE_DIR / "prompts" / "coursebrochure.pdf"
+)
 
 # =========================================================
-# GEMINI SETUP
+# GEMINI MODEL
 # =========================================================
-
-GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-
-if not GOOGLE_API_KEY:
-    st.error("GOOGLE_API_KEY not found.")
-    st.stop()
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash-lite",
@@ -50,7 +69,7 @@ llm = ChatGoogleGenerativeAI(
 )
 
 # =========================================================
-# DATA
+# DIPLOMAS
 # =========================================================
 
 DIPLOMAS = [
@@ -91,6 +110,10 @@ DIPLOMAS = [
     "Diploma in Social Science in Gerontology"
 ]
 
+# =========================================================
+# CATEGORIES
+# =========================================================
+
 CATEGORIES = [
     "Circular Economy",
     "Liveable City and Community",
@@ -106,6 +129,10 @@ CATEGORIES = [
     "Biodiversity and Conservation"
 ]
 
+# =========================================================
+# SOLUTION TYPES
+# =========================================================
+
 SOLUTION_TYPES = [
     "Digital Prototype",
     "Physical Prototype",
@@ -119,8 +146,6 @@ SOLUTION_TYPES = [
 SYSTEM_PROMPT = r'''
 You are an AI sustainability learning assistant for diploma students in Singapore.
 
-Your role is to generate sustainability project ideas that strongly reflect the student's diploma expertise while solving a real sustainability concern.
-
 Retrieved Diploma Knowledge:
 {retrieved_context}
 
@@ -130,42 +155,20 @@ Sustainability Category: {category}
 Sustainability Concern: {concern}
 Preferred Solution Type: {solution}
 
-Core Objective:
-Generate a sustainability solution that:
-- solves the sustainability concern realistically
-- strongly applies diploma-related knowledge and skills
-- remains practical and useful for ordinary users
-- can be completed within 3 months by diploma students
-- shows contribution opportunities for a team of 5 students
-- feels innovative and implementable
+Generate THREE sustainability project ideas.
 
-STRICT CONSISTENCY RULE:
-The diploma specialization and preferred solution type MUST remain fully consistent throughout the generated idea.
+Requirements:
+- strongly align with the diploma
+- realistic and achievable within 3 months
+- solve the sustainability concern
+- follow the selected solution type strictly
+- practical for diploma students
+- concise but meaningful
+- avoid generic ideas
 
-Solution Type Enforcement Rules:
+Output ONLY valid JSON.
 
-If Preferred Solution Type is "Digital Prototype":
-- generate software-based systems such as apps, AI systems, dashboards, websites, automation systems, or smart digital platforms
-
-If Preferred Solution Type is "Physical Prototype":
-- generate tangible physical products, smart devices, engineering systems, machines, wearables, smart bins, filtration devices, packaging innovations, or environmental hardware
-
-If Preferred Solution Type is "Social Campaign":
-- generate awareness-driven solutions focused on behavioural change, community engagement, storytelling, sustainability education, participation systems, or outreach initiatives
-
-STRICT RESTRICTIONS:
-- Do NOT generate digital-only solutions for Physical Prototype
-- Do NOT generate hardware-focused solutions for Digital Prototype
-- Do NOT generate apps or devices for Social Campaign unless they are only supporting tools
-- Avoid overly futuristic ideas
-- Avoid unrealistic solutions
-
-Output Rules:
-- Generate THREE distinct sustainability project ideas
-- Keep each idea concise
-- Return ONLY valid JSON
-
-Return Format:
+Format:
 [
   {{
     "title": "Idea 1",
@@ -208,64 +211,52 @@ if "current_idea" not in st.session_state:
     st.session_state.current_idea = 0
 
 # =========================================================
-# CUSTOM CSS
+# CSS
 # =========================================================
 
 st.markdown(
     """
     <style>
 
-    .main {
-        background-color: #F6F6F6;
-    }
-
     .title {
-        text-align: center;
-        font-size: 48px;
-        font-weight: 700;
-        color: #1F1F1F;
-        margin-top: 40px;
+        text-align:center;
+        font-size:52px;
+        font-weight:700;
     }
 
     .subtitle {
-        text-align: center;
-        font-size: 24px;
-        color: #6B7280;
-        margin-bottom: 40px;
+        text-align:center;
+        font-size:24px;
+        color:#6B7280;
     }
 
     .section-title {
-        font-size: 48px;
-        font-weight: 700;
-        color: #1F1F1F;
-        margin-bottom: 10px;
+        font-size:48px;
+        font-weight:700;
     }
 
     .section-desc {
-        font-size: 22px;
-        color: #6B7280;
-        margin-bottom: 30px;
+        font-size:22px;
+        color:#6B7280;
     }
 
     .idea-card {
-        background-color: white;
-        padding: 40px;
-        border-radius: 20px;
-        border: 1px solid #E5E7EB;
-        min-height: 350px;
+        background-color:white;
+        border-radius:20px;
+        padding:40px;
+        border:1px solid #E5E7EB;
     }
 
     .idea-title {
-        text-align: center;
-        font-size: 34px;
-        font-weight: 700;
-        margin-bottom: 25px;
+        font-size:32px;
+        font-weight:700;
+        text-align:center;
+        margin-bottom:25px;
     }
 
     .idea-text {
-        font-size: 22px;
-        line-height: 1.8;
-        color: #333333;
+        font-size:22px;
+        line-height:1.8;
     }
 
     </style>
@@ -274,7 +265,7 @@ st.markdown(
 )
 
 # =========================================================
-# LOAD RAG DATABASE
+# VECTOR DATABASE
 # =========================================================
 
 @st.cache_resource
@@ -285,28 +276,28 @@ def load_vectorstore():
     documents = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
+        chunk_size=1000,
         chunk_overlap=150
     )
 
-    docs = splitter.split_documents(documents)
+    split_docs = splitter.split_documents(documents)
 
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
     vectorstore = FAISS.from_documents(
-        docs,
+        split_docs,
         embeddings
     )
 
     return vectorstore
 
 # =========================================================
-# RETRIEVE DIPLOMA CONTEXT
+# RETRIEVE CONTEXT
 # =========================================================
 
-def retrieve_diploma_context(diploma):
+def retrieve_context(diploma):
 
     vectorstore = load_vectorstore()
 
@@ -316,7 +307,9 @@ def retrieve_diploma_context(diploma):
 
     docs = retriever.invoke(diploma)
 
-    context = "\n\n".join([doc.page_content for doc in docs])
+    context = "\n\n".join(
+        [doc.page_content for doc in docs]
+    )
 
     return context
 
@@ -326,7 +319,7 @@ def retrieve_diploma_context(diploma):
 
 def generate_ideas():
 
-    retrieved_context = retrieve_diploma_context(
+    retrieved_context = retrieve_context(
         st.session_state.diploma
     )
 
@@ -345,8 +338,15 @@ def generate_ideas():
         content = response.content.strip()
 
         if content.startswith("```json"):
-            content = content.replace("```json", "")
-            content = content.replace("```", "")
+            content = content.replace(
+                "```json",
+                ""
+            )
+
+            content = content.replace(
+                "```",
+                ""
+            )
 
         ideas = json.loads(content)
 
@@ -367,30 +367,34 @@ def generate_ideas():
 
 if st.session_state.page == "welcome":
 
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:70px'></div>",
+        unsafe_allow_html=True
+    )
 
-    col1, col2, col3 = st.columns([1, 2, 1])
+    st.markdown(
+        "<div class='title'>Hi! I'm SCAle.</div>",
+        unsafe_allow_html=True
+    )
 
-    with col2:
+    st.markdown(
+        "<div class='subtitle'>I will help you explore sustainability project ideas tailored to your diploma and interests.</div>",
+        unsafe_allow_html=True
+    )
 
-        st.markdown(
-            "<div class='title'>Hi! I'm SCAle.</div>",
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        "<div style='height:40px'></div>",
+        unsafe_allow_html=True
+    )
 
-        st.markdown(
-            "<div class='subtitle'>I will help you to explore sustainability project ideas tailored to your diploma and interests. Let's get started.</div>",
-            unsafe_allow_html=True
-        )
+    if st.button(
+        "Start Your Project Ideas",
+        use_container_width=True
+    ):
 
-        st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
+        st.session_state.page = "diploma"
 
-        if st.button(
-            "Start Your Project Ideas",
-            use_container_width=True
-        ):
-            st.session_state.page = "diploma"
-            st.rerun()
+        st.rerun()
 
 # =========================================================
 # DIPLOMA PAGE
@@ -399,10 +403,15 @@ if st.session_state.page == "welcome":
 elif st.session_state.page == "diploma":
 
     if st.button("←"):
+
         st.session_state.page = "welcome"
+
         st.rerun()
 
-    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:50px'></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         "<div class='section-title'>What is your diploma?</div>",
@@ -410,7 +419,7 @@ elif st.session_state.page == "diploma":
     )
 
     st.markdown(
-        "<div class='section-desc'>This helps me to tailor sustainability project ideas to your field of study.</div>",
+        "<div class='section-desc'>This helps me tailor ideas to your field of study.</div>",
         unsafe_allow_html=True
     )
 
@@ -419,11 +428,10 @@ elif st.session_state.page == "diploma":
         DIPLOMAS
     )
 
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-
     if st.button("Continue →"):
 
         st.session_state.diploma = diploma
+
         st.session_state.page = "category"
 
         st.rerun()
@@ -435,10 +443,15 @@ elif st.session_state.page == "diploma":
 elif st.session_state.page == "category":
 
     if st.button("←"):
+
         st.session_state.page = "diploma"
+
         st.rerun()
 
-    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:50px'></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         "<div class='section-title'>What sustainability category interests you?</div>",
@@ -446,7 +459,7 @@ elif st.session_state.page == "category":
     )
 
     st.markdown(
-        "<div class='section-desc'>This allows sustainability project ideas align to your focus areas.</div>",
+        "<div class='section-desc'>Choose a sustainability focus area.</div>",
         unsafe_allow_html=True
     )
 
@@ -455,11 +468,10 @@ elif st.session_state.page == "category":
         CATEGORIES
     )
 
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-
     if st.button("Continue →"):
 
         st.session_state.category = category
+
         st.session_state.page = "concern"
 
         st.rerun()
@@ -471,10 +483,15 @@ elif st.session_state.page == "category":
 elif st.session_state.page == "concern":
 
     if st.button("←"):
+
         st.session_state.page = "category"
+
         st.rerun()
 
-    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:50px'></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         "<div class='section-title'>What sustainability problem would you like to solve?</div>",
@@ -482,26 +499,28 @@ elif st.session_state.page == "concern":
     )
 
     st.markdown(
-        "<div class='section-desc'>Share a problem or challenge you have noticed in school, community, or daily life.</div>",
+        "<div class='section-desc'>Share a challenge you noticed in daily life or school.</div>",
         unsafe_allow_html=True
     )
 
     concern = st.text_area(
         "Sustainability concern",
-        max_chars=200,
-        height=220
+        height=220,
+        max_chars=200
     )
-
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
     if st.button("Continue →"):
 
         if concern.strip() == "":
-            st.warning("Please enter your sustainability concern.")
+
+            st.warning(
+                "Please enter a sustainability concern."
+            )
 
         else:
 
             st.session_state.concern = concern
+
             st.session_state.page = "solution"
 
             st.rerun()
@@ -513,10 +532,15 @@ elif st.session_state.page == "concern":
 elif st.session_state.page == "solution":
 
     if st.button("←"):
+
         st.session_state.page = "concern"
+
         st.rerun()
 
-    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:50px'></div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         "<div class='section-title'>Which solution format are you interested in developing?</div>",
@@ -524,7 +548,7 @@ elif st.session_state.page == "solution":
     )
 
     st.markdown(
-        "<div class='section-desc'>This helps me to suggest the right type of project for you.</div>",
+        "<div class='section-desc'>Choose the project format you prefer.</div>",
         unsafe_allow_html=True
     )
 
@@ -533,17 +557,18 @@ elif st.session_state.page == "solution":
         SOLUTION_TYPES
     )
 
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-
     if st.button("Submit"):
 
         st.session_state.solution = solution
 
-        with st.spinner("Generating project ideas..."):
+        with st.spinner(
+            "Generating project ideas..."
+        ):
 
             st.session_state.ideas = generate_ideas()
 
         st.session_state.current_idea = 0
+
         st.session_state.page = "results"
 
         st.rerun()
@@ -558,24 +583,20 @@ elif st.session_state.page == "results":
 
     current = st.session_state.current_idea
 
-    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
-
     st.markdown(
-        "<div style='text-align:center;font-size:30px;'>💡</div>",
+        "<div style='height:30px'></div>",
         unsafe_allow_html=True
     )
 
     st.markdown(
-        "<div style='text-align:center;font-size:28px;font-weight:700;'>Here are your</div>",
+        "<h1 style='text-align:center;color:#2F5F38;'>Project Ideas!</h1>",
         unsafe_allow_html=True
     )
 
     st.markdown(
-        "<div style='text-align:center;font-size:54px;font-weight:700;color:#2F5F38;'>Project Ideas!</div>",
+        "<div style='height:20px'></div>",
         unsafe_allow_html=True
     )
-
-    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 8, 1])
 
@@ -592,22 +613,24 @@ elif st.session_state.page == "results":
     with col2:
 
         st.markdown(
-            f"""
-            <div class='idea-card'>
-                <div class='idea-title'>
-                    {ideas[current]['title']}
+            f'''
+            <div class="idea-card">
+
+                <div class="idea-title">
+                    {ideas[current]["title"]}
                 </div>
 
-                <div class='idea-text'>
-                    {ideas[current]['idea']}
+                <div class="idea-text">
+                    {ideas[current]["idea"]}
                 </div>
+
             </div>
-            """,
+            ''',
             unsafe_allow_html=True
         )
 
         st.markdown(
-            f"<div style='text-align:center;font-size:20px;margin-top:20px'>{current + 1} / {len(ideas)}</div>",
+            f"<div style='text-align:center;margin-top:20px;font-size:20px'>{current + 1} / {len(ideas)}</div>",
             unsafe_allow_html=True
         )
 
@@ -621,7 +644,10 @@ elif st.session_state.page == "results":
 
                 st.rerun()
 
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='height:20px'></div>",
+        unsafe_allow_html=True
+    )
 
     if st.button(
         "Start Over",
@@ -629,6 +655,7 @@ elif st.session_state.page == "results":
     ):
 
         st.session_state.page = "welcome"
+
         st.session_state.diploma = ""
         st.session_state.category = ""
         st.session_state.concern = ""
