@@ -1,315 +1,639 @@
-"""
-SCA Sustainability Project Idea Generator
-==========================================
-
-A Streamlit app that helps Temasek Polytechnic students generate
-sustainability-related SCA group project ideas using Google's Gemini model.
-
-The prompt template and reference context are loaded from markdown files
-in the /prompts directory, so non-technical staff can update them by
-editing those files directly (no Python knowledge required).
-"""
-
+import json
 import os
 import re
 from pathlib import Path
 
 import streamlit as st
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-PROMPTS_DIR = Path(__file__).parent / "prompts"
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
-PROMPT_FILE = PROMPTS_DIR / "system_prompt.md"
-DIPLOMA_FILE = PROMPTS_DIR / "diploma_descriptions.md"
-GUIDELINES_FILE = PROMPTS_DIR / "project_guidelines.md"
+st.set_page_config(
+    page_title="SCAle",
+    page_icon="🌱",
+    layout="wide"
+)
 
-# Placeholders that must exist in the system prompt.
-# If any of these are missing, the app will warn at startup.
-REQUIRED_PLACEHOLDERS = [
-    "{{diploma}}",
-    "{{concern}}",
-    "{{focus_area}}",
-    "{{theme}}",
-    "{{presentation}}",
-    "{{extra_input}}",
-    "{{project_guidelines}}",
-    "{{diploma_description}}",
+# =========================================================
+# FILE PATHS
+# =========================================================
+
+BASE_DIR = Path(__file__).parent
+
+PROMPTS_DIR = BASE_DIR / "prompts"
+
+COURSE_BROCHURE = PROMPTS_DIR / "coursebrochure.pdf"
+
+# =========================================================
+# GEMINI SETUP
+# =========================================================
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+if not GOOGLE_API_KEY:
+    st.error("GOOGLE_API_KEY not found.")
+    st.stop()
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    temperature=0.8,
+    google_api_key=GOOGLE_API_KEY
+)
+
+# =========================================================
+# DATA
+# =========================================================
+
+DIPLOMAS = [
+    "Diploma in Chemical Engineering",
+    "Diploma in Food, Nutrition & Culinary Science",
+    "Diploma in Medical Biotechnology",
+    "Diploma in Pharmaceutical Science",
+    "Diploma in Veterinary Technology",
+    "Diploma in Communication Design",
+    "Diploma in Digital Film & Television",
+    "Diploma in Interior Architecture & Design",
+    "Diploma in Fashion Management & Design",
+    "Diploma in Product Experience & Design",
+    "Diploma in Aerospace Electronics",
+    "Diploma in Aerospace Engineering",
+    "Diploma in Aviation Management",
+    "Diploma in Computer Engineering",
+    "Diploma in Architectural Technology and Building Services",
+    "Diploma in Electrical and Electronics Engineering",
+    "Diploma in Business Process and System Engineering",
+    "Diploma in Integrated Facility Management",
+    "Diploma in Mechatronics",
+    "Diploma in Big Data & Analytics",
+    "Diploma in Cybersecurity & Digital Forensics",
+    "Diploma in Information Technology",
+    "Diploma in Applied Artificial Intelligence",
+    "Diploma in Immersive Media and Game Development",
+    "Diploma in Accountancy & Finance",
+    "Diploma in Business",
+    "Diploma in Communications & Media Management",
+    "Diploma in Culinary Arts & Management",
+    "Diploma in Hospitality & Tourism Management",
+    "Diploma in International Trade & Logistics",
+    "Diploma in Law & Management",
+    "Diploma in Marketing",
+    "Diploma in Early Childhood Development & Education",
+    "Diploma in Psychology Studies",
+    "Diploma in Social Science in Gerontology"
 ]
 
-# The 12 climate change challenge topics from the SCA Group Project Brief,
-# aligned with Singapore's Green Plan 2030.
-GREEN_PLAN_FOCUS_AREAS = [
+CATEGORIES = [
     "Circular Economy",
     "Liveable City and Community",
     "Green Buildings",
     "Renewable Energy",
-    "Green Finance and Impact Investment",
-    "Sustainable Food System / Food Security",
-    "Sustainable Materials / Packaging",
+    "Green Finance and Impact Investing",
+    "Sustainable Food Systems",
+    "Sustainable Materials and Packaging",
     "Green Transportation",
-    "Sustainable / Regenerative Tourism",
+    "Sustainable Tourism",
     "Green Economy Opportunities",
-    "Waste Management & Recycling",
-    "Biodiversity and Conservation",
+    "Waste Management and Recycling",
+    "Biodiversity and Conservation"
 ]
 
-# Deliverable formats from the project brief.
-PRESENTATION_MODES = [
-    "Physical prototype or model",
-    "Digital prototype (app/website mock-up, model drawings)",
-    "Social media campaign (3 sample posts)",
-    "Short video (~1 minute)",
-    "Podcast (~3 minutes)",
+SOLUTION_TYPES = [
+    "Digital Prototype",
+    "Physical Prototype",
+    "Social Campaign"
 ]
 
+# =========================================================
+# SYSTEM PROMPT
+# =========================================================
 
-# ---------------------------------------------------------------------------
-# File loading (cached so we only read from disk once per session)
-# ---------------------------------------------------------------------------
+SYSTEM_PROMPT = r'''
+You are an AI sustainability learning assistant for diploma students in Singapore.
 
-@st.cache_data
-def load_text_file(path: Path) -> str:
-    """Read a markdown/text file from disk. Cached for the session."""
-    return path.read_text(encoding="utf-8")
+Your role is to generate sustainability project ideas that strongly reflect the student's diploma expertise while solving a real sustainability concern.
 
+Retrieved Diploma Knowledge:
+{retrieved_context}
 
-def extract_diploma_names(diploma_markdown: str) -> list[str]:
+Student Inputs:
+Diploma: {diploma}
+Sustainability Category: {category}
+Sustainability Concern: {concern}
+Preferred Solution Type: {solution}
+
+Core Objective:
+Generate a sustainability solution that:
+- solves the sustainability concern realistically
+- strongly applies diploma-related knowledge and skills
+- remains practical and useful for ordinary users
+- can be completed within 3 months by diploma students
+- shows contribution opportunities for a team of 5 students
+- feels innovative and implementable
+
+STRICT CONSISTENCY RULE:
+The diploma specialization and preferred solution type MUST remain fully consistent throughout the generated idea.
+
+Solution Type Enforcement Rules:
+
+If Preferred Solution Type is "Digital Prototype":
+- generate software-based systems such as apps, AI systems, dashboards, websites, automation systems, or smart digital platforms
+
+If Preferred Solution Type is "Physical Prototype":
+- generate tangible physical products, smart devices, engineering systems, machines, wearables, smart bins, filtration devices, packaging innovations, or environmental hardware
+
+If Preferred Solution Type is "Social Campaign":
+- generate awareness-driven solutions focused on behavioural change, community engagement, storytelling, sustainability education, participation systems, or outreach initiatives
+
+STRICT RESTRICTIONS:
+- Do NOT generate digital-only solutions for Physical Prototype
+- Do NOT generate hardware-focused solutions for Digital Prototype
+- Do NOT generate apps or devices for Social Campaign unless they are only supporting tools
+- Avoid overly futuristic ideas
+- Avoid unrealistic solutions
+
+Output Rules:
+- Generate THREE distinct sustainability project ideas
+- Keep each idea concise
+- Return ONLY valid JSON
+
+Return Format:
+[
+  {{
+    "title": "Idea 1",
+    "idea": "..."
+  }},
+  {{
+    "title": "Idea 2",
+    "idea": "..."
+  }},
+  {{
+    "title": "Idea 3",
+    "idea": "..."
+  }}
+]
+'''
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
+if "page" not in st.session_state:
+    st.session_state.page = "welcome"
+
+if "diploma" not in st.session_state:
+    st.session_state.diploma = ""
+
+if "category" not in st.session_state:
+    st.session_state.category = ""
+
+if "concern" not in st.session_state:
+    st.session_state.concern = ""
+
+if "solution" not in st.session_state:
+    st.session_state.solution = ""
+
+if "ideas" not in st.session_state:
+    st.session_state.ideas = []
+
+if "current_idea" not in st.session_state:
+    st.session_state.current_idea = 0
+
+# =========================================================
+# CUSTOM CSS
+# =========================================================
+
+st.markdown(
     """
-    Pull diploma names out of the diploma_descriptions.md file by looking
-    for level-2 headings (## Diploma in ...).
+    <style>
 
-    This way, when colleagues add a new diploma to the markdown file,
-    it automatically appears in the dropdown.
-    """
-    names = re.findall(r"^##\s+(Diploma\s+in\s+.+?)\s*$", diploma_markdown, re.MULTILINE)
-    return names
+    .main {
+        background-color: #F6F6F6;
+    }
 
+    .title {
+        text-align: center;
+        font-size: 48px;
+        font-weight: 700;
+        color: #1F1F1F;
+        margin-top: 40px;
+    }
 
-def extract_diploma_section(diploma_markdown: str, diploma_name: str) -> str:
-    """
-    Extract just the section for the selected diploma from the full
-    diploma descriptions file. Keeps the prompt focused.
-    """
-    pattern = rf"##\s+{re.escape(diploma_name)}\s*\n(.*?)(?=\n##\s+|\Z)"
-    match = re.search(pattern, diploma_markdown, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    # Fallback: return the whole file if we can't isolate the section.
-    return diploma_markdown
+    .subtitle {
+        text-align: center;
+        font-size: 24px;
+        color: #6B7280;
+        margin-bottom: 40px;
+    }
 
+    .section-title {
+        font-size: 48px;
+        font-weight: 700;
+        color: #1F1F1F;
+        margin-bottom: 10px;
+    }
 
-def validate_prompt_placeholders(prompt_text: str) -> list[str]:
-    """Return a list of required placeholders that are missing from the prompt."""
-    return [p for p in REQUIRED_PLACEHOLDERS if p not in prompt_text]
+    .section-desc {
+        font-size: 22px;
+        color: #6B7280;
+        margin-bottom: 30px;
+    }
 
+    .idea-card {
+        background-color: white;
+        padding: 40px;
+        border-radius: 20px;
+        border: 1px solid #E5E7EB;
+        min-height: 350px;
+    }
 
-def fill_prompt(template: str, values: dict) -> str:
-    """
-    Replace {{placeholder}} tokens in the template with actual values.
+    .idea-title {
+        text-align: center;
+        font-size: 34px;
+        font-weight: 700;
+        margin-bottom: 25px;
+    }
 
-    Using simple string replacement (not Python's .format() or f-strings)
-    so that any stray curly braces in the markdown won't cause errors.
-    """
-    filled = template
-    for key, value in values.items():
-        filled = filled.replace(f"{{{{{key}}}}}", str(value))
-    return filled
+    .idea-text {
+        font-size: 22px;
+        line-height: 1.8;
+        color: #333333;
+    }
 
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-# ---------------------------------------------------------------------------
-# LLM setup
-# ---------------------------------------------------------------------------
+# =========================================================
+# LOAD RAG DATABASE
+# =========================================================
 
 @st.cache_resource
-def get_llm():
-    """
-    Initialise the Gemini LLM. Reads the API key from Streamlit secrets
-    (.streamlit/secrets.toml) or from the GOOGLE_API_KEY environment variable.
-    """
-    api_key = st.secrets.get("GOOGLE_API_KEY") if hasattr(st, "secrets") else None
-    if not api_key:
-        api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        st.error(
-            "No Google API key found. Please add `GOOGLE_API_KEY` to "
-            "`.streamlit/secrets.toml` or set it as an environment variable."
-        )
-        st.stop()
+def load_vectorstore():
 
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
-        temperature=0.3,  # a touch of creativity for varied ideas
-        google_api_key=api_key,
+    loader = PyMuPDFLoader(str(COURSE_BROCHURE))
+
+    documents = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=150
     )
 
+    docs = splitter.split_documents(documents)
 
-# ---------------------------------------------------------------------------
-# Streamlit UI
-# ---------------------------------------------------------------------------
-
-st.set_page_config(
-    page_title="SCA Sustainability Project Idea Generator",
-    page_icon="🌱",
-    layout="centered",
-)
-
-st.title("🌱 SCA Sustainability Project Idea Generator")
-st.caption(
-    "Get tailored project ideas aligned with your diploma and Singapore's "
-    "Green Plan 2030."
-)
-
-# ---- Load prompt files & validate -----------------------------------------
-
-try:
-    prompt_template = load_text_file(PROMPT_FILE)
-    diploma_markdown = load_text_file(DIPLOMA_FILE)
-    guidelines_markdown = load_text_file(GUIDELINES_FILE)
-except FileNotFoundError as e:
-    st.error(
-        f"Could not find a required prompt file: `{e.filename}`. "
-        "Please make sure the `prompts/` folder exists with all three files."
-    )
-    st.stop()
-
-missing = validate_prompt_placeholders(prompt_template)
-if missing:
-    st.error(
-        "The system prompt is missing required placeholders: "
-        + ", ".join(f"`{m}`" for m in missing)
-        + ". Please check `prompts/system_prompt.md` and add them back."
-    )
-    st.stop()
-
-diploma_names = extract_diploma_names(diploma_markdown)
-if not diploma_names:
-    st.error(
-        "No diplomas could be found in `prompts/diploma_descriptions.md`. "
-        "Each diploma should be under a `## Diploma in ...` heading."
-    )
-    st.stop()
-
-# ---- Form -----------------------------------------------------------------
-
-st.markdown("### Tell us about your project")
-
-with st.form("project_form"):
-    diploma = st.selectbox(
-        "Diploma Programme",
-        options=diploma_names,
-        help="Select your diploma so suggestions match your skills.",
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    concern = st.text_input(
-        "Sustainability Concern",
-        placeholder="e.g. Food waste in hawker centres",
-        help="What sustainability issue interests or worries you?",
+    vectorstore = FAISS.from_documents(
+        docs,
+        embeddings
     )
 
-    focus_area = st.selectbox(
-        "Green Plan Focus Area",
-        options=GREEN_PLAN_FOCUS_AREAS,
-        help="Choose one of the climate change challenge topics from the SCA Group Project brief.",
+    return vectorstore
+
+# =========================================================
+# RETRIEVE DIPLOMA CONTEXT
+# =========================================================
+
+def retrieve_diploma_context(diploma):
+
+    vectorstore = load_vectorstore()
+
+    retriever = vectorstore.as_retriever(
+        search_kwargs={"k": 4}
     )
 
-    theme = st.text_input(
-        "Project Theme",
-        placeholder="e.g. Awareness campaign for students",
-        help="A specific angle or theme you'd like to explore.",
+    docs = retriever.invoke(diploma)
+
+    context = "\n\n".join([doc.page_content for doc in docs])
+
+    return context
+
+# =========================================================
+# GENERATE IDEAS
+# =========================================================
+
+def generate_ideas():
+
+    retrieved_context = retrieve_diploma_context(
+        st.session_state.diploma
     )
 
-    presentation = st.multiselect(
-        "Preferred Deliverable Format(s)",
-        options=PRESENTATION_MODES,
-        help="Select one or more formats you'd be interested in producing.",
+    prompt = SYSTEM_PROMPT.format(
+        retrieved_context=retrieved_context,
+        diploma=st.session_state.diploma,
+        category=st.session_state.category,
+        concern=st.session_state.concern,
+        solution=st.session_state.solution
     )
 
-    extra_input = st.text_area(
-        "Additional Preferences (optional)",
-        placeholder="Anything else? Budget constraints, group size, technical skills, target audience...",
-        height=100,
-    )
+    response = llm.invoke(prompt)
 
-    submitted = st.form_submit_button("✨ Generate Project Ideas", type="primary")
+    try:
 
-# ---- Optional: prompt preview (helpful for staff verifying edits) ----------
+        content = response.content.strip()
 
-with st.expander("🔍 Preview the assembled prompt (for staff)"):
-    st.caption(
-        "This shows exactly what gets sent to the AI based on your form input. "
-        "Useful for verifying that edits to the markdown files are working as expected."
-    )
-    if diploma and concern and focus_area and theme:
-        preview = fill_prompt(
-            prompt_template,
+        if content.startswith("```json"):
+            content = content.replace("```json", "")
+            content = content.replace("```", "")
+
+        ideas = json.loads(content)
+
+        return ideas
+
+    except Exception:
+
+        return [
             {
-                "diploma": diploma,
-                "concern": concern,
-                "focus_area": focus_area,
-                "theme": theme,
-                "presentation": ", ".join(presentation) if presentation else "(not specified)",
-                "extra_input": extra_input or "None",
-                "project_guidelines": guidelines_markdown,
-                "diploma_description": extract_diploma_section(diploma_markdown, diploma),
-            },
+                "title": "Error",
+                "idea": response.content
+            }
+        ]
+
+# =========================================================
+# WELCOME PAGE
+# =========================================================
+
+if st.session_state.page == "welcome":
+
+    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+
+        st.markdown(
+            "<div class='title'>Hi! I'm SCAle.</div>",
+            unsafe_allow_html=True
         )
-        st.code(preview, language="markdown")
-    else:
-        st.info("Fill in the form fields above to see the assembled prompt.")
 
-# ---- Handle submission ----------------------------------------------------
+        st.markdown(
+            "<div class='subtitle'>I will help you to explore sustainability project ideas tailored to your diploma and interests. Let's get started.</div>",
+            unsafe_allow_html=True
+        )
 
-if submitted:
-    # Validate required fields
-    if not all([diploma, concern, focus_area, theme]) or not presentation:
-        st.warning("Please complete all required fields before generating ideas.")
-        st.stop()
+        st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
 
-    # Build the final prompt
-    final_prompt = fill_prompt(
-        prompt_template,
-        {
-            "diploma": diploma,
-            "concern": concern,
-            "focus_area": focus_area,
-            "theme": theme,
-            "presentation": ", ".join(presentation),
-            "extra_input": extra_input.strip() if extra_input.strip() else "None",
-            "project_guidelines": guidelines_markdown,
-            "diploma_description": extract_diploma_section(diploma_markdown, diploma),
-        },
+        if st.button(
+            "Start Your Project Ideas",
+            use_container_width=True
+        ):
+            st.session_state.page = "diploma"
+            st.rerun()
+
+# =========================================================
+# DIPLOMA PAGE
+# =========================================================
+
+elif st.session_state.page == "diploma":
+
+    if st.button("←"):
+        st.session_state.page = "welcome"
+        st.rerun()
+
+    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='section-title'>What is your diploma?</div>",
+        unsafe_allow_html=True
     )
 
-    # Call the LLM
-    llm = get_llm()
-    with st.spinner("Generating ideas tailored to your profile..."):
-        try:
-            response = llm.invoke(final_prompt)
-            answer = response.content if hasattr(response, "content") else str(response)
-        except Exception as e:
-            st.error(f"Something went wrong while generating ideas: {e}")
-            st.stop()
-
-    st.markdown("### 💡 Your Project Ideas")
-    st.markdown(answer)
-
-    st.download_button(
-        label="📥 Download ideas as Markdown",
-        data=answer,
-        file_name=f"sca_project_ideas_{diploma.replace(' ', '_')}.md",
-        mime="text/markdown",
+    st.markdown(
+        "<div class='section-desc'>This helps me to tailor sustainability project ideas to your field of study.</div>",
+        unsafe_allow_html=True
     )
 
-# ---- Footer ---------------------------------------------------------------
+    diploma = st.selectbox(
+        "Select your diploma",
+        DIPLOMAS
+    )
 
-st.divider()
-st.caption(
-    "These suggestions are AI-generated starting points. Always discuss with "
-    "your tutor and refer to the official SCA Group Project Brief for the "
-    "final assessment criteria."
-)
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    if st.button("Continue →"):
+
+        st.session_state.diploma = diploma
+        st.session_state.page = "category"
+
+        st.rerun()
+
+# =========================================================
+# CATEGORY PAGE
+# =========================================================
+
+elif st.session_state.page == "category":
+
+    if st.button("←"):
+        st.session_state.page = "diploma"
+        st.rerun()
+
+    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='section-title'>What sustainability category interests you?</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='section-desc'>This allows sustainability project ideas align to your focus areas.</div>",
+        unsafe_allow_html=True
+    )
+
+    category = st.selectbox(
+        "Select sustainability category",
+        CATEGORIES
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    if st.button("Continue →"):
+
+        st.session_state.category = category
+        st.session_state.page = "concern"
+
+        st.rerun()
+
+# =========================================================
+# CONCERN PAGE
+# =========================================================
+
+elif st.session_state.page == "concern":
+
+    if st.button("←"):
+        st.session_state.page = "category"
+        st.rerun()
+
+    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='section-title'>What sustainability problem would you like to solve?</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='section-desc'>Share a problem or challenge you have noticed in school, community, or daily life.</div>",
+        unsafe_allow_html=True
+    )
+
+    concern = st.text_area(
+        "Sustainability concern",
+        max_chars=200,
+        height=220
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    if st.button("Continue →"):
+
+        if concern.strip() == "":
+            st.warning("Please enter your sustainability concern.")
+
+        else:
+
+            st.session_state.concern = concern
+            st.session_state.page = "solution"
+
+            st.rerun()
+
+# =========================================================
+# SOLUTION PAGE
+# =========================================================
+
+elif st.session_state.page == "solution":
+
+    if st.button("←"):
+        st.session_state.page = "concern"
+        st.rerun()
+
+    st.markdown("<div style='height:70px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='section-title'>Which solution format are you interested in developing?</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='section-desc'>This helps me to suggest the right type of project for you.</div>",
+        unsafe_allow_html=True
+    )
+
+    solution = st.selectbox(
+        "Select Solution Type",
+        SOLUTION_TYPES
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    if st.button("Submit"):
+
+        st.session_state.solution = solution
+
+        with st.spinner("Generating project ideas..."):
+
+            st.session_state.ideas = generate_ideas()
+
+        st.session_state.current_idea = 0
+        st.session_state.page = "results"
+
+        st.rerun()
+
+# =========================================================
+# RESULTS PAGE
+# =========================================================
+
+elif st.session_state.page == "results":
+
+    ideas = st.session_state.ideas
+
+    current = st.session_state.current_idea
+
+    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div style='text-align:center;font-size:30px;'>💡</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div style='text-align:center;font-size:28px;font-weight:700;'>Here are your</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div style='text-align:center;font-size:54px;font-weight:700;color:#2F5F38;'>Project Ideas!</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 8, 1])
+
+    with col1:
+
+        if st.button("⬅"):
+
+            if current > 0:
+
+                st.session_state.current_idea -= 1
+
+                st.rerun()
+
+    with col2:
+
+        st.markdown(
+            f"""
+            <div class='idea-card'>
+                <div class='idea-title'>
+                    {ideas[current]['title']}
+                </div>
+
+                <div class='idea-text'>
+                    {ideas[current]['idea']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.markdown(
+            f"<div style='text-align:center;font-size:20px;margin-top:20px'>{current + 1} / {len(ideas)}</div>",
+            unsafe_allow_html=True
+        )
+
+    with col3:
+
+        if st.button("➡"):
+
+            if current < len(ideas) - 1:
+
+                st.session_state.current_idea += 1
+
+                st.rerun()
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    if st.button(
+        "Start Over",
+        use_container_width=True
+    ):
+
+        st.session_state.page = "welcome"
+        st.session_state.diploma = ""
+        st.session_state.category = ""
+        st.session_state.concern = ""
+        st.session_state.solution = ""
+        st.session_state.ideas = []
+        st.session_state.current_idea = 0
+
+        st.rerun()
