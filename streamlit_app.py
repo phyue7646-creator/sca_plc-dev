@@ -37,7 +37,7 @@ COURSE_BROCHURE = PROMPTS_DIR / "coursebrochure.pdf"
 # GEMINI SETUP
 # =========================================================
 
-GOOGLE_API_KEY = st.secrets("AIzaSyDsOO7qnN85h73cuH4OF9frGOItc5BPTY8")
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 if not GOOGLE_API_KEY:
     st.error("GOOGLE_API_KEY not found.")
