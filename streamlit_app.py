@@ -1,17 +1,7 @@
 import json
-from pathlib import Path
-
 import streamlit as st
 
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings
-)
-
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_community.vectorstores import FAISS
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # =========================================================
 # PAGE CONFIG
@@ -37,25 +27,13 @@ except Exception:
         """
         GOOGLE_API_KEY not found.
 
-        Go to:
-        App Settings → Secrets
+        Add this in Streamlit Secrets:
 
-        Add:
         GOOGLE_API_KEY="your_api_key"
         """
     )
 
     st.stop()
-
-# =========================================================
-# FILE PATH
-# =========================================================
-
-BASE_DIR = Path(__file__).parent
-
-COURSE_BROCHURE = (
-    BASE_DIR / "prompts" / "coursebrochure.pdf"
-)
 
 # =========================================================
 # GEMINI MODEL
@@ -139,14 +117,11 @@ SOLUTION_TYPES = [
 ]
 
 # =========================================================
-# SYSTEM PROMPT
+# PROMPT
 # =========================================================
 
-SYSTEM_PROMPT = r'''
+SYSTEM_PROMPT = """
 You are an AI sustainability learning assistant for diploma students in Singapore.
-
-Retrieved Diploma Knowledge:
-{retrieved_context}
 
 Student Inputs:
 Diploma: {diploma}
@@ -164,8 +139,6 @@ Requirements:
 - practical for diploma students
 - concise but meaningful
 - avoid generic ideas
-
-Solution Rules:
 
 If the solution type is "Digital Prototype":
 - generate apps, AI systems, websites, dashboards, smart platforms, automation systems, or IoT interfaces
@@ -193,7 +166,7 @@ Format:
     "idea": "..."
   }}
 ]
-'''
+"""
 
 # =========================================================
 # SESSION STATE
@@ -202,18 +175,6 @@ Format:
 if "page" not in st.session_state:
     st.session_state.page = "welcome"
 
-if "diploma" not in st.session_state:
-    st.session_state.diploma = ""
-
-if "category" not in st.session_state:
-    st.session_state.category = ""
-
-if "concern" not in st.session_state:
-    st.session_state.concern = ""
-
-if "solution" not in st.session_state:
-    st.session_state.solution = ""
-
 if "ideas" not in st.session_state:
     st.session_state.ideas = []
 
@@ -221,129 +182,21 @@ if "current_idea" not in st.session_state:
     st.session_state.current_idea = 0
 
 # =========================================================
-# CSS
-# =========================================================
-
-st.markdown(
-    """
-    <style>
-
-    .title {
-        text-align:center;
-        font-size:52px;
-        font-weight:700;
-    }
-
-    .subtitle {
-        text-align:center;
-        font-size:24px;
-        color:#6B7280;
-    }
-
-    .section-title {
-        font-size:48px;
-        font-weight:700;
-    }
-
-    .section-desc {
-        font-size:22px;
-        color:#6B7280;
-    }
-
-    .idea-card {
-        background-color:white;
-        border-radius:20px;
-        padding:40px;
-        border:1px solid #E5E7EB;
-    }
-
-    .idea-title {
-        font-size:32px;
-        font-weight:700;
-        text-align:center;
-        margin-bottom:25px;
-    }
-
-    .idea-text {
-        font-size:22px;
-        line-height:1.8;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# =========================================================
-# VECTOR DATABASE
-# =========================================================
-
-@st.cache_resource
-def load_vectorstore():
-
-    loader = PyMuPDFLoader(
-        str(COURSE_BROCHURE)
-    )
-
-    documents = loader.load()
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150
-    )
-
-    split_docs = splitter.split_documents(
-        documents
-    )
-
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
-        google_api_key=GOOGLE_API_KEY
-    )
-
-    vectorstore = FAISS.from_documents(
-        split_docs,
-        embeddings
-    )
-
-    return vectorstore
-
-# =========================================================
-# RETRIEVE CONTEXT
-# =========================================================
-
-def retrieve_context(diploma):
-
-    vectorstore = load_vectorstore()
-
-    retriever = vectorstore.as_retriever(
-        search_kwargs={"k": 4}
-    )
-
-    docs = retriever.invoke(diploma)
-
-    context = "\n\n".join(
-        [doc.page_content for doc in docs]
-    )
-
-    return context
-
-# =========================================================
 # GENERATE IDEAS
 # =========================================================
 
-def generate_ideas():
-
-    retrieved_context = retrieve_context(
-        st.session_state.diploma
-    )
+def generate_ideas(
+    diploma,
+    category,
+    concern,
+    solution
+):
 
     prompt = SYSTEM_PROMPT.format(
-        retrieved_context=retrieved_context,
-        diploma=st.session_state.diploma,
-        category=st.session_state.category,
-        concern=st.session_state.concern,
-        solution=st.session_state.solution
+        diploma=diploma,
+        category=category,
+        concern=concern,
+        solution=solution
     )
 
     response = llm.invoke(prompt)
@@ -352,17 +205,15 @@ def generate_ideas():
 
         content = response.content.strip()
 
-        if content.startswith("```json"):
+        content = content.replace(
+            "```json",
+            ""
+        )
 
-            content = content.replace(
-                "```json",
-                ""
-            )
-
-            content = content.replace(
-                "```",
-                ""
-            )
+        content = content.replace(
+            "```",
+            ""
+        )
 
         ideas = json.loads(content)
 
@@ -372,7 +223,7 @@ def generate_ideas():
 
         return [
             {
-                "title": "Error",
+                "title": "Generation Error",
                 "idea": response.content
             }
         ]
@@ -383,141 +234,65 @@ def generate_ideas():
 
 if st.session_state.page == "welcome":
 
-    st.markdown(
-        "<div style='height:70px'></div>",
-        unsafe_allow_html=True
-    )
+    st.title("Hi! I'm SCAle.")
 
-    st.markdown(
-        "<div class='title'>Hi! I'm SCAle.</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='subtitle'>I will help you explore sustainability project ideas tailored to your diploma and interests.</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div style='height:40px'></div>",
-        unsafe_allow_html=True
+    st.write(
+        "I will help you explore sustainability project ideas tailored to your diploma and interests."
     )
 
     if st.button(
-        "Start Your Project Ideas",
-        use_container_width=True
+        "Start Your Project Ideas"
     ):
 
-        st.session_state.page = "diploma"
+        st.session_state.page = "form"
 
         st.rerun()
 
 # =========================================================
-# DIPLOMA PAGE
+# FORM PAGE
 # =========================================================
 
-elif st.session_state.page == "diploma":
-
-    st.header("What is your diploma?")
+elif st.session_state.page == "form":
 
     diploma = st.selectbox(
-        "Select your diploma",
+        "What is your diploma?",
         DIPLOMAS
     )
 
-    if st.button("Continue →"):
-
-        st.session_state.diploma = diploma
-
-        st.session_state.page = "category"
-
-        st.rerun()
-
-# =========================================================
-# CATEGORY PAGE
-# =========================================================
-
-elif st.session_state.page == "category":
-
-    st.header(
-        "What sustainability category interests you?"
-    )
-
     category = st.selectbox(
-        "Select sustainability category",
+        "What sustainability category interests you?",
         CATEGORIES
     )
 
-    if st.button("Continue →"):
-
-        st.session_state.category = category
-
-        st.session_state.page = "concern"
-
-        st.rerun()
-
-# =========================================================
-# CONCERN PAGE
-# =========================================================
-
-elif st.session_state.page == "concern":
-
-    st.header(
-        "What sustainability problem would you like to solve?"
-    )
-
     concern = st.text_area(
-        "Sustainability concern",
-        height=220,
-        max_chars=200
-    )
-
-    if st.button("Continue →"):
-
-        if concern.strip() == "":
-
-            st.warning(
-                "Please enter a sustainability concern."
-            )
-
-        else:
-
-            st.session_state.concern = concern
-
-            st.session_state.page = "solution"
-
-            st.rerun()
-
-# =========================================================
-# SOLUTION PAGE
-# =========================================================
-
-elif st.session_state.page == "solution":
-
-    st.header(
-        "Which solution format are you interested in developing?"
+        "What sustainability problem would you like to solve?",
+        max_chars=200,
+        height=200
     )
 
     solution = st.selectbox(
-        "Select Solution Type",
+        "Which solution format are you interested in developing?",
         SOLUTION_TYPES
     )
 
-    if st.button("Submit"):
-
-        st.session_state.solution = solution
+    if st.button("Generate Ideas"):
 
         with st.spinner(
             "Generating project ideas..."
         ):
 
-            st.session_state.ideas = generate_ideas()
+            st.session_state.ideas = generate_ideas(
+                diploma,
+                category,
+                concern,
+                solution
+            )
 
-        st.session_state.current_idea = 0
+            st.session_state.current_idea = 0
 
-        st.session_state.page = "results"
+            st.session_state.page = "results"
 
-        st.rerun()
+            st.rerun()
 
 # =========================================================
 # RESULTS PAGE
@@ -565,18 +340,12 @@ elif st.session_state.page == "results":
         f"{current + 1} / {len(ideas)}"
     )
 
-    if st.button(
-        "Start Over",
-        use_container_width=True
-    ):
+    if st.button("Start Over"):
 
         st.session_state.page = "welcome"
 
-        st.session_state.diploma = ""
-        st.session_state.category = ""
-        st.session_state.concern = ""
-        st.session_state.solution = ""
         st.session_state.ideas = []
+
         st.session_state.current_idea = 0
 
         st.rerun()
