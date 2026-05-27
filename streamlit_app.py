@@ -3,13 +3,12 @@ from pathlib import Path
 
 import streamlit as st
 
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.vectorstores import FAISS
+
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -296,9 +295,8 @@ def load_vectorstore():
         documents
     )
 
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
-        google_api_key=GOOGLE_API_KEY
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
     vectorstore = FAISS.from_documents(
@@ -383,24 +381,10 @@ def generate_ideas():
 
 if st.session_state.page == "welcome":
 
-    st.markdown(
-        "<div style='height:70px'></div>",
-        unsafe_allow_html=True
-    )
+    st.title("Hi! I'm SCAle.")
 
-    st.markdown(
-        "<div class='title'>Hi! I'm SCAle.</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='subtitle'>I will help you explore sustainability project ideas tailored to your diploma and interests.</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div style='height:40px'></div>",
-        unsafe_allow_html=True
+    st.write(
+        "I will help you explore sustainability project ideas tailored to your diploma and interests."
     )
 
     if st.button(
@@ -418,26 +402,7 @@ if st.session_state.page == "welcome":
 
 elif st.session_state.page == "diploma":
 
-    if st.button("←"):
-
-        st.session_state.page = "welcome"
-
-        st.rerun()
-
-    st.markdown(
-        "<div style='height:50px'></div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-title'>What is your diploma?</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-desc'>This helps me tailor ideas to your field of study.</div>",
-        unsafe_allow_html=True
-    )
+    st.header("What is your diploma?")
 
     diploma = st.selectbox(
         "Select your diploma",
@@ -458,25 +423,8 @@ elif st.session_state.page == "diploma":
 
 elif st.session_state.page == "category":
 
-    if st.button("←"):
-
-        st.session_state.page = "diploma"
-
-        st.rerun()
-
-    st.markdown(
-        "<div style='height:50px'></div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-title'>What sustainability category interests you?</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-desc'>Choose a sustainability focus area.</div>",
-        unsafe_allow_html=True
+    st.header(
+        "What sustainability category interests you?"
     )
 
     category = st.selectbox(
@@ -498,25 +446,8 @@ elif st.session_state.page == "category":
 
 elif st.session_state.page == "concern":
 
-    if st.button("←"):
-
-        st.session_state.page = "category"
-
-        st.rerun()
-
-    st.markdown(
-        "<div style='height:50px'></div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-title'>What sustainability problem would you like to solve?</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-desc'>Share a challenge you noticed in daily life or school.</div>",
-        unsafe_allow_html=True
+    st.header(
+        "What sustainability problem would you like to solve?"
     )
 
     concern = st.text_area(
@@ -547,25 +478,8 @@ elif st.session_state.page == "concern":
 
 elif st.session_state.page == "solution":
 
-    if st.button("←"):
-
-        st.session_state.page = "concern"
-
-        st.rerun()
-
-    st.markdown(
-        "<div style='height:50px'></div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-title'>Which solution format are you interested in developing?</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<div class='section-desc'>Choose the project format you prefer.</div>",
-        unsafe_allow_html=True
+    st.header(
+        "Which solution format are you interested in developing?"
     )
 
     solution = st.selectbox(
@@ -599,26 +513,21 @@ elif st.session_state.page == "results":
 
     current = st.session_state.current_idea
 
-    st.markdown(
-        "<div style='height:30px'></div>",
-        unsafe_allow_html=True
+    st.title("Project Ideas!")
+
+    st.subheader(
+        ideas[current]["title"]
     )
 
-    st.markdown(
-        "<h1 style='text-align:center;color:#2F5F38;'>Project Ideas!</h1>",
-        unsafe_allow_html=True
+    st.write(
+        ideas[current]["idea"]
     )
 
-    st.markdown(
-        "<div style='height:20px'></div>",
-        unsafe_allow_html=True
-    )
-
-    col1, col2, col3 = st.columns([1, 8, 1])
+    col1, col2 = st.columns(2)
 
     with col1:
 
-        if st.button("⬅"):
+        if st.button("⬅ Previous"):
 
             if current > 0:
 
@@ -628,31 +537,7 @@ elif st.session_state.page == "results":
 
     with col2:
 
-        st.markdown(
-            f'''
-            <div class="idea-card">
-
-                <div class="idea-title">
-                    {ideas[current]["title"]}
-                </div>
-
-                <div class="idea-text">
-                    {ideas[current]["idea"]}
-                </div>
-
-            </div>
-            ''',
-            unsafe_allow_html=True
-        )
-
-        st.markdown(
-            f"<div style='text-align:center;margin-top:20px;font-size:20px'>{current + 1} / {len(ideas)}</div>",
-            unsafe_allow_html=True
-        )
-
-    with col3:
-
-        if st.button("➡"):
+        if st.button("Next ➡"):
 
             if current < len(ideas) - 1:
 
@@ -660,9 +545,8 @@ elif st.session_state.page == "results":
 
                 st.rerun()
 
-    st.markdown(
-        "<div style='height:20px'></div>",
-        unsafe_allow_html=True
+    st.write(
+        f"{current + 1} / {len(ideas)}"
     )
 
     if st.button(
