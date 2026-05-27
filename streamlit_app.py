@@ -3,12 +3,13 @@ from pathlib import Path
 
 import streamlit as st
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
+    GoogleGenerativeAIEmbeddings
+)
 
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.vectorstores import FAISS
-
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -61,7 +62,7 @@ COURSE_BROCHURE = (
 # =========================================================
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     temperature=0.8,
     google_api_key=GOOGLE_API_KEY
 )
@@ -295,8 +296,9 @@ def load_vectorstore():
         documents
     )
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=GOOGLE_API_KEY
     )
 
     vectorstore = FAISS.from_documents(
@@ -381,10 +383,24 @@ def generate_ideas():
 
 if st.session_state.page == "welcome":
 
-    st.title("Hi! I'm SCAle.")
+    st.markdown(
+        "<div style='height:70px'></div>",
+        unsafe_allow_html=True
+    )
 
-    st.write(
-        "I will help you explore sustainability project ideas tailored to your diploma and interests."
+    st.markdown(
+        "<div class='title'>Hi! I'm SCAle.</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='subtitle'>I will help you explore sustainability project ideas tailored to your diploma and interests.</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div style='height:40px'></div>",
+        unsafe_allow_html=True
     )
 
     if st.button(
