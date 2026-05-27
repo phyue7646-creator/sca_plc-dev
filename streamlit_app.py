@@ -3,12 +3,13 @@ from pathlib import Path
 
 import streamlit as st
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
+    GoogleGenerativeAIEmbeddings
+)
 
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.vectorstores import FAISS
-
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -37,11 +38,9 @@ except Exception:
         GOOGLE_API_KEY not found.
 
         Go to:
-
         App Settings → Secrets
 
-        Then add:
-
+        Add:
         GOOGLE_API_KEY="your_api_key"
         """
     )
@@ -166,6 +165,17 @@ Requirements:
 - concise but meaningful
 - avoid generic ideas
 
+Solution Rules:
+
+If the solution type is "Digital Prototype":
+- generate apps, AI systems, websites, dashboards, smart platforms, automation systems, or IoT interfaces
+
+If the solution type is "Physical Prototype":
+- generate physical products, smart devices, engineering systems, machines, wearables, or environmental hardware
+
+If the solution type is "Social Campaign":
+- focus on awareness, behavioural change, outreach, education, storytelling, participation, or engagement
+
 Output ONLY valid JSON.
 
 Format:
@@ -271,7 +281,9 @@ st.markdown(
 @st.cache_resource
 def load_vectorstore():
 
-    loader = PyMuPDFLoader(str(COURSE_BROCHURE))
+    loader = PyMuPDFLoader(
+        str(COURSE_BROCHURE)
+    )
 
     documents = loader.load()
 
@@ -280,10 +292,13 @@ def load_vectorstore():
         chunk_overlap=150
     )
 
-    split_docs = splitter.split_documents(documents)
+    split_docs = splitter.split_documents(
+        documents
+    )
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        google_api_key=GOOGLE_API_KEY
     )
 
     vectorstore = FAISS.from_documents(
@@ -338,6 +353,7 @@ def generate_ideas():
         content = response.content.strip()
 
         if content.startswith("```json"):
+
             content = content.replace(
                 "```json",
                 ""
